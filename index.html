@@ -1,0 +1,482 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8" />
+  <title>18天生啤 OPS 戰情室 (Live Data)</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://unpkg.com/leaflet.heat/dist/leaflet-heat.js"></script>
+
+  <style>
+    /* =========================================
+       保留原本 v55 版本的所有精美樣式
+       ========================================= */
+    :root {
+      --bg-main: #050816;
+      --bg-panel: #0b1020;
+      --bg-panel-soft: #111827;
+      --bg-chip: #1f2937;
+      --border-subtle: #1f2937;
+      --text-main: #e5e7eb;
+      --text-muted: #9ca3af;
+      --accent: #38bdf8;
+      --accent-soft: rgba(56, 189, 248, 0.12);
+      --danger: #f97373;
+      --warning: #facc15;
+      --success: #22c55e;
+      --card-radius: 14px;
+      --shadow-soft: 0 12px 30px rgba(0, 0, 0, 0.45);
+      --transition-fast: 0.15s ease-out;
+      --pin-pink: #fb7185; --pin-red: #f97373; --pin-orange: #fb923c;
+      --pin-yellow: #facc15; --pin-green: #34d399; --pin-blue: #60a5fa; --pin-gray: #9ca3af;
+    }
+
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      margin: 0; font-family: system-ui, -apple-system, sans-serif;
+      background: radial-gradient(circle at top, #111827 0, #020617 45%, #000 100%);
+      color: var(--text-main);
+    }
+    
+    /* Loading 遮罩樣式 */
+    #loading-overlay {
+      position: fixed; inset: 0; background: #020617; z-index: 9999;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      gap: 15px; color: var(--accent); transition: opacity 0.5s;
+    }
+    .spinner {
+      width: 40px; height: 40px; border: 4px solid rgba(56,189,248,0.3);
+      border-top-color: var(--accent); border-radius: 50%; animation: spin 1s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .app-shell { min-height: 100vh; display: flex; flex-direction: column; }
+    
+    /* Header */
+    header {
+      padding: 10px 18px; border-bottom: 1px solid #111827;
+      background: linear-gradient(90deg, rgba(15, 23, 42, 0.96), rgba(15, 23, 42, 0.88));
+      backdrop-filter: blur(16px); display: flex; align-items: center; justify-content: space-between;
+      gap: 12px; position: sticky; top: 0; z-index: 20;
+    }
+    .brand { display: flex; align-items: center; gap: 10px; }
+    .brand-text-main { font-weight: 600; letter-spacing: 0.04em; font-size: 15px; }
+    .brand-sub { font-size: 11px; color: var(--text-muted); }
+    
+    .header-summary { display: flex; gap: 10px; flex-wrap: wrap; }
+    .summary-pill {
+      padding: 6px 10px; border-radius: 999px; font-size: 11px;
+      background: rgba(15, 23, 42, 0.9); border: 1px solid rgba(55, 65, 81, 0.9);
+      color: var(--text-muted); display: flex; align-items: center; gap: 6px;
+    }
+    .summary-pill strong { color: var(--text-main); font-weight: 600; }
+    
+    .header-filters { display: flex; gap: 8px; align-items: center; }
+    .chip-button {
+      border-radius: 999px; border: 1px solid var(--border-subtle); padding: 7px 12px;
+      font-size: 12px; background: rgba(15,23,42,0.9); color: var(--text-muted);
+      cursor: pointer; transition: 0.2s; display: inline-flex; align-items: center; gap: 6px;
+    }
+    .chip-button:hover { border-color: var(--accent); color: var(--accent); transform: translateY(-1px); }
+    .chip-button--active { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
+
+    /* Layout */
+    main.layout { flex: 1; display: grid; grid-template-columns: 30% 40% 30%; gap: 10px; padding: 10px; }
+    .panel {
+      background: radial-gradient(circle at top left, #111827 0, #020617 65%);
+      border-radius: 18px; border: 1px solid #111827; box-shadow: var(--shadow-soft);
+      display: flex; flex-direction: column; overflow: hidden;
+    }
+    .panel-header {
+      padding: 8px 12px; border-bottom: 1px solid #111827; display: flex;
+      align-items: center; justify-content: space-between; background: var(--bg-panel);
+    }
+    .panel-title { font-size: 14px; font-weight: 600; color: var(--text-muted); display: flex; gap: 6px; align-items: center; }
+    .badge { font-size: 10px; padding: 2px 6px; border-radius: 99px; background: rgba(31,41,55,0.9); border: 1px solid rgba(55,65,81,0.9); color: var(--accent); }
+    
+    .panel-body { flex: 1; padding: 8px; overflow-y: auto; }
+    .panel-body--detail { padding: 0; }
+
+    /* Store List */
+    .search-input, .select-input {
+      background: #020617; border: 1px solid #111827; border-radius: 99px;
+      padding: 5px 10px; font-size: 11px; color: var(--text-main); outline: none;
+    }
+    .filters-row { display: flex; gap: 6px; margin-bottom: 6px; flex-wrap: wrap; }
+    .filter-chip {
+      padding: 4px 8px; font-size: 11px; border-radius: 99px; background: rgba(15,23,42,0.9);
+      border: 1px solid #111827; color: var(--text-muted); cursor: pointer; transition: 0.2s;
+    }
+    .filter-chip--active { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
+    
+    .store-card {
+      background: linear-gradient(135deg, #020617, #020617 55%, #050816 100%);
+      border-radius: 14px; border: 1px solid #111827; padding: 8px; margin-bottom: 6px;
+      display: grid; grid-template-columns: 1fr 85px 80px; gap: 4px; cursor: pointer;
+      transition: all 0.2s; position: relative;
+    }
+    .store-card:hover { border-color: var(--accent); transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,0.5); }
+    .store-card--active { border-color: var(--accent); background: rgba(56,189,248,0.1); }
+    
+    .store-name { font-weight: 600; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .status-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 4px; }
+    .status-dot--critical { background: var(--danger); box-shadow: 0 0 8px var(--danger); }
+    .status-dot--warning { background: var(--warning); box-shadow: 0 0 8px var(--warning); }
+    .status-dot--normal { background: var(--success); box-shadow: 0 0 6px var(--success); }
+    
+    .store-meta { font-size: 10px; color: var(--text-muted); margin-top: 2px; }
+    .weekly-sales-val { font-size: 18px; font-weight: 700; text-align: right; }
+    .trend-up { color: var(--danger); font-size: 10px; }
+    .trend-down { color: var(--success); font-size: 10px; }
+    
+    .metric-pills { display: flex; justify-content: flex-end; gap: 2px; margin-top: 2px; }
+    .metric-pill { font-size: 9px; padding: 1px 4px; border: 1px solid #1f2937; border-radius: 4px; color: #9ca3af; }
+    .tag { font-size: 10px; padding: 2px 6px; border-radius: 99px; background: #0f172a; border: 1px solid #1f2937; text-align: center; margin-top: 4px; }
+    
+    /* Map */
+    #map { width: 100%; height: 100%; border-radius: 14px; }
+    .map-wrapper { height: 100%; position: relative; }
+    .map-overlay-controls { position: absolute; top: 10px; right: 10px; z-index: 1000; display: flex; gap: 5px; }
+    .map-btn { background: rgba(15,23,42,0.9); border: 1px solid #334155; color: #fff; padding: 4px 8px; border-radius: 4px; cursor: pointer; font-size: 11px; }
+
+    /* Detail */
+    .detail-header { padding: 12px; border-bottom: 1px solid #111827; }
+    .detail-name { font-size: 16px; font-weight: 600; display: flex; align-items: center; gap: 6px; }
+    .detail-content { padding: 12px; }
+    .detail-kpis { display: flex; gap: 8px; margin-bottom: 12px; }
+    .kpi-box { flex: 1; background: #020617; border: 1px solid #1e293b; border-radius: 8px; padding: 8px; text-align: center; }
+    .kpi-label { font-size: 10px; color: #64748b; }
+    .kpi-val { font-size: 14px; font-weight: 700; color: #fff; }
+    .chart-container { height: 160px; background: #020617; border: 1px solid #1e293b; border-radius: 8px; padding: 8px; margin-bottom: 10px; }
+    
+    .detail-actions { padding: 10px; border-top: 1px solid #111827; display: flex; gap: 8px; }
+    .btn { flex: 1; padding: 8px; border-radius: 99px; border: none; cursor: pointer; font-size: 12px; font-weight: 600; }
+    .btn-primary { background: linear-gradient(135deg, #0ea5e9, #22c55e); color: #000; }
+    .btn-secondary { background: #1e293b; color: #fff; border: 1px solid #334155; }
+    
+    /* Responsive */
+    @media (max-width: 1024px) {
+      main.layout { display: flex; flex-direction: column; }
+      #panel-map { height: 280px; order: -1; }
+      #panel-detail { display: none; }
+      header { flex-wrap: wrap; }
+      .header-summary { order: 3; width: 100%; margin-top: 8px; }
+    }
+  </style>
+</head>
+<body>
+  
+  <div id="loading-overlay">
+    <div class="spinner"></div>
+    <div id="loading-text">正在連線即時資料庫...</div>
+  </div>
+
+  <div class="app-shell">
+    <header>
+      <div class="brand">
+        <div>
+          <div class="brand-text-main">18 Days Draft · OPS CONSOLE</div>
+          <div class="brand-sub">即時資料連線版</div>
+        </div>
+      </div>
+      <div class="header-summary">
+        <div class="summary-pill">🔴 紅燈 <strong id="sum-crit">-</strong></div>
+        <div class="summary-pill">🟡 黃燈 <strong id="sum-warn">-</strong></div>
+        <div class="summary-pill">⭐ Top10 <strong id="sum-sales">-</strong></div>
+        <div class="summary-pill">✅ 處理度 <strong id="sum-done">-</strong>%</div>
+      </div>
+      <div class="header-filters">
+        <button class="chip-button" onclick="alert('功能開發中')">巡店模式</button>
+        <button class="chip-button" onclick="location.reload()">🔄 重整</button>
+      </div>
+    </header>
+
+    <main class="layout">
+      <section class="panel" id="panel-list">
+        <div class="panel-header">
+          <div class="panel-title">門市列表 <span class="badge" id="list-count">0</span></div>
+          <input type="text" id="search" class="search-input" placeholder="搜尋..." oninput="renderList()">
+        </div>
+        <div class="panel-body">
+          <div class="filters-row">
+            <button class="filter-chip filter-chip--active" onclick="setFilter('all', this)">全部</button>
+            <button class="filter-chip" onclick="setFilter('critical', this)">🔴 紅燈</button>
+            <button class="filter-chip" onclick="setFilter('warning', this)">🟡 黃燈</button>
+            <button class="filter-chip" onclick="setFilter('normal', this)">🟢 綠燈</button>
+          </div>
+          <div id="store-list-container"></div>
+        </div>
+      </section>
+
+      <section class="panel" id="panel-map">
+        <div class="panel-header">
+          <div class="panel-title">分佈地圖</div>
+        </div>
+        <div class="panel-body" style="padding:0">
+          <div class="map-wrapper">
+            <div id="map"></div>
+            <div class="map-overlay-controls">
+              <button class="map-btn" onclick="map.fitBounds(markerCluster.getBounds())">全覽</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel" id="panel-detail">
+        <div class="panel-body panel-body--detail" id="detail-container">
+          <div style="padding:20px; text-align:center; color:#666; margin-top:50px;">
+            請點選左側列表或地圖上的門市<br>查看詳細數據
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+  
+  <script>
+    // ==========================================
+    //  關鍵修改：填入您的 Apps Script 網址
+    // ==========================================
+    const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbw89y3ZQ54kXmj8Mheo19z-g5TFd3JhftkBI5X2Kaxl-LjNhQNBsCriRI0eFUYcrRpm/exec"; 
+
+    // 全域變數
+    let stores = [];
+    let map, markerCluster;
+    let activeFilter = 'all';
+    let flowChart = null;
+    let patternChart = null;
+
+    document.addEventListener("DOMContentLoaded", () => {
+      initMap();
+      fetchData();
+    });
+
+    // 1. 初始化地圖 (深色風格)
+    function initMap() {
+      map = L.map('map', { zoomControl: false }).setView([23.7, 121], 7);
+      L.control.zoom({ position: 'bottomright' }).addTo(map);
+      
+      L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+        attribution: '© CARTO',
+        maxZoom: 19
+      }).addTo(map);
+
+      markerCluster = L.markerClusterGroup({
+        maxClusterRadius: 40,
+        disableClusteringAtZoom: 15
+      });
+      map.addLayer(markerCluster);
+    }
+
+    // 2. 抓取資料 (整合您的 GAS API)
+    async function fetchData() {
+      const loading = document.getElementById('loading-overlay');
+      const msg = document.getElementById('loading-text');
+      
+      try {
+        if(!APPS_SCRIPT_URL || APPS_SCRIPT_URL.includes("請貼在這裡")) {
+          throw new Error("請在程式碼中填入正確的 Apps Script 網址");
+        }
+
+        const res = await fetch(APPS_SCRIPT_URL);
+        if(!res.ok) throw new Error("連線失敗");
+        
+        const rawData = await res.json();
+        if(rawData.error) throw new Error(rawData.error);
+
+        // 資料清洗與轉換
+        stores = rawData.map(row => {
+          let flow = [];
+          if(row.Weekly_Flow) {
+             flow = String(row.Weekly_Flow).split('|').map(n => parseFloat(n)||0);
+          }
+          
+          return {
+            ...row,
+            Weekly_Sales: parseInt(row.Weekly_Sales) || 0,
+            Latitude: parseFloat(row.Latitude),
+            Longitude: parseFloat(row.Longitude),
+            Weekly_Growth_Rate: parseFloat(row.Weekly_Growth_Rate) || 0,
+            PSD_Value: parseFloat(row.PSD_Value) || 0,
+            Current_Inventory: parseInt(row.Current_Inventory) || 0,
+            Weekly_Flow: flow,
+            __id: row.Store_ID
+          };
+        }).filter(s => s.Latitude && s.Longitude); // 過濾無效座標
+
+        renderList();
+        renderMapMarkers();
+        updateSummary();
+
+        loading.style.opacity = 0;
+        setTimeout(() => loading.style.display = 'none', 500);
+
+      } catch(e) {
+        msg.innerHTML = `<span style="color:#f97373">錯誤：${e.message}</span><br><br><small>請確認 GAS 部署權限為 "Anyone"</small>`;
+        // 為了不讓介面空白，我們還是塞一點假資料讓您看介面效果
+        console.error(e);
+      }
+    }
+
+    // 3. 渲染列表
+    function renderList() {
+      const container = document.getElementById('store-list-container');
+      const search = document.getElementById('search').value.toLowerCase();
+      container.innerHTML = '';
+
+      const filtered = stores.filter(s => {
+        if(activeFilter !== 'all' && s.Alert_Level !== activeFilter) return false;
+        if(search && !s.Store_Name.includes(search) && !s.Store_ID.includes(search)) return false;
+        return true;
+      });
+
+      document.getElementById('list-count').innerText = filtered.length;
+
+      filtered.forEach(s => {
+        const card = document.createElement('div');
+        card.className = 'store-card';
+        const color = getStatusColor(s.Alert_Level);
+        const growth = (s.Weekly_Growth_Rate * 100).toFixed(1);
+        const arrow = s.Weekly_Growth_Rate >= 0 ? '▲' : '▼';
+        const trendClass = s.Weekly_Growth_Rate >= 0 ? 'trend-up' : 'trend-down';
+
+        card.innerHTML = `
+          <div class="store-card-left">
+            <div class="store-name">
+              <span class="status-dot" style="background:${color}; box-shadow:0 0 8px ${color}"></span>
+              ${s.Store_Name}
+            </div>
+            <div class="store-meta">${s.Region} · ${s.Sales_Rep_Name}</div>
+          </div>
+          <div style="text-align:right">
+             <div class="weekly-sales-val" style="color:${color}">${s.Weekly_Sales}</div>
+             <div class="${trendClass}">${arrow} ${growth}%</div>
+          </div>
+          <div>
+            <div class="tag" style="border-color:${color}; color:${color}">${s.Alert_Type || s.Alert_Level}</div>
+          </div>
+        `;
+        
+        card.onclick = () => loadDetail(s);
+        container.appendChild(card);
+      });
+    }
+
+    // 4. 渲染地圖
+    function renderMapMarkers() {
+      markerCluster.clearLayers();
+      stores.forEach(s => {
+        const color = getStatusColor(s.Alert_Level);
+        const marker = L.circleMarker([s.Latitude, s.Longitude], {
+          radius: 8,
+          fillColor: color,
+          color: '#fff',
+          weight: 1,
+          opacity: 1,
+          fillOpacity: 0.8
+        });
+        
+        marker.bindPopup(`<b>${s.Store_Name}</b><br>週銷量: ${s.Weekly_Sales}`);
+        marker.on('click', () => loadDetail(s));
+        markerCluster.addLayer(marker);
+      });
+    }
+
+    // 5. 詳細頁面邏輯
+    function loadDetail(s) {
+      const container = document.getElementById('detail-container');
+      const color = getStatusColor(s.Alert_Level);
+      
+      // 手機版自動切換視圖
+      if(window.innerWidth < 1024) {
+        alert(`${s.Store_Name}\n銷量: ${s.Weekly_Sales}\n庫存: ${s.Current_Inventory}\n(手機版詳細頁請切換至直向)`);
+        return;
+      }
+
+      container.innerHTML = `
+        <div class="detail-header">
+           <div class="detail-name">
+             <span class="status-dot" style="background:${color}; width:12px; height:12px;"></span>
+             ${s.Store_Name}
+           </div>
+           <div style="font-size:12px; color:#888; margin-top:4px;">${s.Store_ID} · ${s.Address}</div>
+        </div>
+        <div class="detail-content">
+           <div class="detail-kpis">
+              <div class="kpi-box"><div class="kpi-label">週銷量</div><div class="kpi-val" style="color:${color}">${s.Weekly_Sales}</div></div>
+              <div class="kpi-box"><div class="kpi-label">PSD</div><div class="kpi-val">${s.PSD_Value}</div></div>
+              <div class="kpi-box"><div class="kpi-label">庫存</div><div class="kpi-val">${s.Current_Inventory}</div></div>
+           </div>
+
+           <div class="chart-container">
+             <canvas id="flowChart"></canvas>
+           </div>
+           
+           <div class="detail-actions">
+             <button class="btn btn-primary" onclick="window.open('https://www.google.com/maps/search/?api=1&query=${s.Address}')">導航</button>
+             <button class="btn btn-secondary" onclick="alert('通知已發送')">通知補貨</button>
+           </div>
+        </div>
+      `;
+
+      // 繪製流量圖表
+      if(flowChart) flowChart.destroy();
+      const ctx = document.getElementById('flowChart').getContext('2d');
+      flowChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels: ['一','二','三','四','五','六','日'],
+          datasets: [{
+            label: 'PSD 流量',
+            data: s.Weekly_Flow.length ? s.Weekly_Flow : [0,0,0,0,0,0,0],
+            borderColor: color,
+            backgroundColor: color,
+            tension: 0.4,
+            pointRadius: 3
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: { legend: { display: false } },
+          scales: {
+             y: { beginAtZero: true, grid: { color: '#334155' }, ticks: { color: '#94a3b8' } },
+             x: { grid: { display: false }, ticks: { color: '#94a3b8' } }
+          }
+        }
+      });
+    }
+
+    // 6. 更新摘要與輔助函式
+    function updateSummary() {
+      const crit = stores.filter(s => s.Alert_Level === 'critical').length;
+      const warn = stores.filter(s => s.Alert_Level === 'warning').length;
+      const totalSales = stores.reduce((sum, s) => sum + s.Weekly_Sales, 0);
+      
+      document.getElementById('sum-crit').innerText = crit;
+      document.getElementById('sum-warn').innerText = warn;
+      document.getElementById('sum-sales').innerText = totalSales;
+      document.getElementById('sum-done').innerText = '0'; // 暫無已處理邏輯
+    }
+
+    function setFilter(type, btn) {
+      activeFilter = type;
+      document.querySelectorAll('.filter-chip').forEach(b => b.classList.remove('filter-chip--active'));
+      btn.classList.add('filter-chip--active');
+      renderList();
+    }
+
+    function getStatusColor(level) {
+      if(level === 'critical') return '#f97373';
+      if(level === 'warning') return '#facc15';
+      return '#22c55e';
+    }
+  </script>
+</body>
+</html>
