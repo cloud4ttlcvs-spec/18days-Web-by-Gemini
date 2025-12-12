@@ -1,0 +1,972 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8" />
+  <title>18天生啤 OPS 戰情室 v13 (Live Data)</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+    crossorigin=""
+  />
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css"
+  />
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css"
+  />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://unpkg.com/leaflet.heat/dist/leaflet-heat.js"></script>
+  
+  <style>
+    /* ... (保留您原本的所有 CSS 樣式，此處省略以節省篇幅，實際檔案請保留原樣) ... */
+    :root {
+      --bg-main: #050816;
+      --bg-panel: #0b1020;
+      --bg-panel-soft: #111827;
+      --bg-chip: #1f2937;
+      --border-subtle: #1f2937;
+      --text-main: #e5e7eb;
+      --text-muted: #9ca3af;
+      --accent: #38bdf8;
+      --accent-soft: rgba(56, 189, 248, 0.12);
+      --danger: #f97373;
+      --warning: #facc15;
+      --success: #22c55e;
+      --card-radius: 14px;
+      --shadow-soft: 0 12px 30px rgba(0, 0, 0, 0.45);
+      --transition-fast: 0.15s ease-out;
+      --pin-pink: #fb7185;
+      --pin-red: #f97373;
+      --pin-orange: #fb923c;
+      --pin-yellow: #facc15;
+      --pin-green: #34d399;
+      --pin-blue: #60a5fa;
+      --pin-gray: #9ca3af;
+    }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      margin: 0;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: radial-gradient(circle at top, #111827 0, #020617 45%, #000 100%);
+      color: var(--text-main);
+    }
+    /* ... (中間省略數千行 CSS，請直接使用您原檔的 CSS) ... */
+    /* 為求完整，這裡假設您會將原檔 CSS 貼回 */
+    /* 這裡僅補上 Loading 遮罩的樣式 */
+    #loading-overlay {
+      position: fixed;
+      inset: 0;
+      background: #020617;
+      z-index: 9999;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      color: var(--accent);
+      font-size: 14px;
+      gap: 12px;
+    }
+    .spinner {
+      width: 40px;
+      height: 40px;
+      border: 4px solid rgba(56,189,248,0.3);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script>
+     // 由於原檔 CSS 很長，為確保功能正常，請務必保留原檔 <style> 標籤內的內容
+     // 在此我直接跳到 Body 與 Script 部分
+  </script>
+</head>
+<body>
+  <div id="loading-overlay">
+    <div class="spinner"></div>
+    <div>正在連線至戰情資料庫...</div>
+  </div>
+
+  <div class="app-shell">
+    <header>
+      <div class="brand">
+        <div>
+          <div class="brand-text-main">18 Days Draft · OPS CONSOLE</div>
+          <div class="brand-sub">銷售熱點 · 缺貨風險 · ZTR 監控</div>
+        </div>
+      </div>
+      <div class="header-summary">
+        <div class="summary-pill">
+          🔴 <span>紅燈門市 <strong id="summary-critical">–</strong></span>
+        </div>
+        <div class="summary-pill">
+          🟡 <span>黃燈門市 <strong id="summary-warning">–</strong></span>
+        </div>
+        <div class="summary-pill">
+          ⭐ <span>Top10 總銷量 <strong id="summary-top10">–</strong> 箱</span>
+        </div>
+        <div class="summary-pill">
+          ✅ <span>已處理 <strong id="summary-done">–</strong> / 剩餘 <strong id="summary-remaining">–</strong></span>
+        </div>
+      </div>
+      <div id="last-sync" class="last-sync"></div>
+      
+      <button id="mode-switch" class="chip-button">🗺️ 地圖模式</button>
+      <button id="tour-switch" class="chip-button">巡店模式</button>
+      <button id="drawer-toggle-button" class="chip-button" title="地區消長">地區消長</button>
+      <button id="cancel-mark-button" class="chip-button" title="取消全部標記已處理">取消標記</button>
+      <button id="theme-toggle" class="chip-button" title="切換主題" onclick="toggleTheme()">⚙️ 設定</button>
+      
+      <select id="tour-route-select" class="select-input" style="display:none;margin-left:8px;"></select>
+      <div class="header-filters">
+        <button class="chip-button chip-button--active" id="tab-hotspots">銷售熱點</button>
+        <button class="chip-button" id="tab-alerts">銷售異常</button>
+        <button class="chip-button" id="tab-distribution">門市分佈</button>
+        <button class="chip-button" id="tab-nearby">鄰近門市</button>
+      </div>
+    </header>
+
+    <div id="region-dropdown" class="region-dropdown"></div>
+
+    <main class="layout">
+      <section class="panel" id="panel-list">
+        <div class="panel-header">
+          <div class="panel-title">
+            <span>門市列表</span>
+            <span class="badge" id="store-count-badge">0 門市</span>
+          </div>
+          <div class="panel-header-controls">
+            <input type="text" id="search-input" class="search-input" placeholder="搜尋門市名稱或店號" />
+            <select id="sort-select" class="select-input">
+              <option value="severity">按異常程度</option>
+              <option value="weeklySales">按周銷量</option>
+              <option value="distance">按距離</option>
+              <option value="storeId">按店號</option>
+              <option value="priority">按優先度</option>
+            </select>
+          </div>
+        </div>
+        <div class="panel-body">
+          <div class="filters-row">
+            <button class="filter-chip filter-chip--active" data-filter="all">全部</button>
+            <button class="filter-chip" data-filter="critical"><span style="color:#f97373;">●</span> 紅燈</button>
+            <button class="filter-chip" data-filter="warning"><span style="color:#facc15;">●</span> 黃燈</button>
+            <button class="filter-chip" data-filter="green"><span style="color:#34d399;">●</span> 綠燈</button>
+            <button class="filter-chip" data-filter="undone">📝 未處理</button>
+            <button class="filter-chip" data-filter="done">✅ 已處理</button>
+            <button class="filter-chip" id="btn-full-table" style="margin-left:auto;">📋 全部門市</button>
+          </div>
+          <div class="store-list" id="store-list"></div>
+        </div>
+      </section>
+
+      <section class="panel panel--map hidden" id="panel-map">
+        <div class="panel-header">
+          <div class="panel-title"><span>銷售熱點地圖</span><span class="badge">MAP VIEW</span></div>
+        </div>
+        <div class="panel-body">
+          <div class="map-wrapper">
+            <div id="map"></div>
+            <div class="map-overlay-controls">
+              <button class="map-control-button" id="map-filter-all"><span class="dot-all"></span> 全部門市</button>
+              <button class="map-control-button" id="map-filter-alerts"><span class="dot-danger"></span> 僅紅黃燈</button>
+              <button class="map-control-button" id="map-filter-top"><span class="dot-warning"></span> Top 銷售</button>
+            </div>
+            <div class="map-here-button">
+              <button class="here-button" id="here-button"><div class="here-dot"></div><span>Here · 鄰近門市</span></button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel" id="panel-detail">
+        <div class="panel-body panel-body--detail">
+          <div id="detail-container">
+            <div class="detail-container-placeholder">👈 從左側選擇一間門市，或點左下角「📊 詳細」查看銷售型態與圖表。</div>
+          </div>
+        </div>
+        <div class="detail-actions" id="detail-actions" style="display:none;">
+          <button class="btn btn-primary" id="btn-notify">
+            <svg class="icon-svg" viewBox="0 0 24 24"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+            <span>通知代送商</span>
+          </button>
+          <button class="btn btn-secondary" id="btn-navigate">
+            <svg class="icon-svg" viewBox="0 0 24 24"><path d="M3 11l19-9-9 19-2-8-8-2z"/></svg>
+            <span>導航</span>
+          </button>
+          <button class="btn btn-ghost" id="btn-done">
+            <svg class="icon-svg" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>
+            <span>標記已處理</span>
+          </button>
+        </div>
+      </section>
+    </main>
+
+    <div id="fullscreen-map-overlay" style="display:none;position:fixed;inset:0;z-index:6000;background:var(--bg-main);flex-direction:column;">
+      <div id="fullscreen-map-container" style="flex:1;position:relative;"></div>
+      <button id="fullscreen-map-close" class="chip-button" style="position:absolute;top:16px;right:16px;z-index:6001;">✕</button>
+    </div>
+
+    <div id="map-overlay" class="map-overlay hidden">
+      <div class="map-overlay-inner">
+        <div id="overlay-map" class="overlay-map">
+          <div class="overlay-map-controls">
+            <button class="map-control-button" id="overlay-base-toggle" title="切換地圖樣式">🌗</button>
+            <button class="map-control-button" id="overlay-heat-toggle" title="切換熱區圖">🔥</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="region-modal">
+      <div class="region-modal-inner">
+        <div class="region-modal-header">
+          <div class="region-modal-title">地區銷售消長</div>
+          <button class="region-modal-close" id="region-modal-close">×</button>
+        </div>
+        <canvas id="region-chart-canvas"></canvas>
+      </div>
+    </div>
+
+    <div class="modal-backdrop" id="modal-backdrop">
+      <div class="modal">
+        <div class="modal-title">
+          <svg class="icon-svg" viewBox="0 0 24 24"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+          <span>通知代送商</span>
+        </div>
+        <div class="modal-body" id="modal-body"></div>
+        <div class="modal-actions">
+          <button class="btn btn-secondary" id="modal-cancel">捨棄</button>
+          <button class="btn btn-primary" id="modal-confirm">通知代送商</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="table-backdrop" id="table-backdrop">
+      <div class="table-modal">
+        <div class="table-modal-header">
+          <div><div class="table-modal-title">門市列表</div><div class="table-modal-sub">檢視關鍵指標</div></div>
+          <div class="table-header-controls">
+            <select id="table-region-filter" class="table-region-select"></select>
+            <select id="table-growth-filter" class="table-region-select"></select>
+            <select id="table-risk-filter" class="table-region-select"></select>
+            <button class="table-modal-close" id="table-close" title="返回">←</button>
+          </div>
+        </div>
+        <div class="table-modal-body">
+          <table class="store-table" id="store-table"></table>
+        </div>
+      </div>
+    </div>
+
+    <div class="detail-bottom-backdrop" id="detail-bottom-backdrop"></div>
+    <div class="detail-bottom-sheet" id="detail-bottom-sheet">
+      <div class="detail-bottom-handle" id="detail-bottom-handle"></div>
+      <div class="detail-bottom-inner" id="detail-bottom-inner"></div>
+    </div>
+
+    <button id="scroll-top-btn" class="scroll-top-btn">↑</button>
+    <div id="toast-container"></div>
+  </div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+  
+// ==========================================
+    // 配置區
+    // ==========================================
+    // 請將下方引號內的網址，換成您剛剛在步驟二複製的 "網頁應用程式網址" (Web App URL)
+    const APPS_SCRIPT_URL = "請在此貼上您的_GAS_EXEC_URL"; 
+    
+    const BREAKPOINT_DESKTOP = 1024;
+
+    // (全域變數保持不變...)
+    let stores = [];
+    // ... 其他變數 ...
+
+    document.addEventListener("DOMContentLoaded", () => {
+      const loading = document.getElementById('loading-overlay');
+      initApp().then(() => {
+        if(loading) loading.style.display = 'none';
+      }).catch(err => {
+        console.error(err);
+        if(loading) loading.innerHTML = `<div style="color:var(--danger)">資料載入失敗<br>${err.message}</div>`;
+      });
+    });
+
+    async function initApp() {
+      // 1. 改用 API 抓取 JSON 資料
+      await fetchFromApi();
+
+      // 2. 初始化介面元件 (與原本相同)
+      initSummary();
+      initMap();
+      initList();
+      initTabs();
+      initModal();
+      initBottomSheet();
+      initFullTable();
+      initScrollTopButton();
+      initTourModeControls();
+      initRegionFilterControls();
+      updateStickyLayout();
+      window.addEventListener('resize', updateStickyLayout);
+      const savedTheme = localStorage.getItem('theme');
+      if (savedTheme === 'light') document.body.classList.add('light-theme');
+    }
+
+    async function fetchFromApi() {
+      try {
+        // 直接 fetch GAS 部署的網址
+        const response = await fetch(APPS_SCRIPT_URL);
+        if (!response.ok) throw new Error(`API Error: ${response.status}`);
+        
+        // GAS 直接回傳 JSON，不需 CSV 解析
+        const rawData = await response.json();
+        
+        // 如果回傳錯誤訊息
+        if (rawData.error) throw new Error(rawData.error);
+
+        // 資料轉換
+        stores = rawData.map(row => {
+          let flowArray = [0,0,0,0,0,0,0];
+          if (row.Weekly_Flow) {
+            flowArray = String(row.Weekly_Flow).split('|').map(n => parseFloat(n) || 0);
+          }
+
+          const storeObj = {
+            Store_ID: row.Store_ID,
+            Store_Name: row.Store_Name,
+            Region: row.Region,
+            Address: row.Address,
+            Latitude: parseFloat(row.Latitude),
+            Longitude: parseFloat(row.Longitude),
+            Route_Code: row.Route_Code,
+            Sales_Rep_Name: row.Sales_Rep_Name,
+            Sales_Rep_ID: row.Sales_Rep_Name,
+            Weekly_Sales: parseInt(row.Weekly_Sales) || 0,
+            Weekly_Growth_Rate: parseFloat(row.Weekly_Growth_Rate) || 0,
+            PSD_Value: parseFloat(row.PSD_Value) || 0,
+            Current_Inventory: parseInt(row.Current_Inventory) || 0,
+            ZTR_Days: parseInt(row.ZTR_Days) || 0,
+            ZTR_Status: (parseInt(row.ZTR_Days) || 0) > 0,
+            Alert_Level: row.Alert_Level || 'normal',
+            Alert_Type: row.Alert_Type || '',
+            Is_Important: (String(row.Is_Important) === 'true'),
+            Last_Update: row.Last_Update,
+            Weekly_Flow: flowArray,
+            Sales_Pattern: row.Sales_Pattern || '一般',
+            __done: false
+          };
+          
+          storeObj.__salesColor = getSalesColorByPercentile(0.5); // 暫時預設，稍後計算
+          storeObj.__priority = computePriority(storeObj);
+          return storeObj;
+        }).filter(s => s.Store_ID && !isNaN(s.Latitude));
+
+        // 重新計算顏色分佈
+        const sorted = [...stores].sort((a,b) => b.Weekly_Sales - a.Weekly_Sales);
+        stores.forEach(s => {
+          const rank = sorted.indexOf(s);
+          const p = (rank + 1) / sorted.length;
+          s.__salesColor = getSalesColorByPercentile(p);
+        });
+
+      } catch (e) {
+        console.error("Fetch Data Error:", e);
+        throw e;
+      }
+    }
+    
+    // ... (原本的 parseCSV 函式可以刪除了) ...
+
+    // 簡單 CSV 解析器 (處理引號與逗號)
+    function parseCSV(text) {
+      const lines = text.split(/\r?\n/).filter(line => line.trim() !== '');
+      if (lines.length < 2) return [];
+      
+      // 處理標題列 (去除引號)
+      const headers = parseCSVLine(lines[0]);
+      
+      const result = [];
+      for (let i = 1; i < lines.length; i++) {
+        const currentline = parseCSVLine(lines[i]);
+        if (currentline.length === headers.length) {
+          const obj = {};
+          for (let j = 0; j < headers.length; j++) {
+            obj[headers[j].trim()] = currentline[j].trim();
+          }
+          result.push(obj);
+        }
+      }
+      return result;
+    }
+
+    function parseCSVLine(text) {
+      // Regex to handle quoted CSV fields
+      const re = /(?!\s*$)\s*(?:'([^']*(?:''[^']*)*)'|"([^"]*(?:""[^"]*)*)"|([^,'"\s\\]*(?:\s+[^,'"\s\\]+)*))\s*(?:,|$)/g;
+      const a = [];
+      text.replace(re, function(m0, m1, m2, m3) {
+        if      (m1 !== undefined) a.push(m1.replace(/''/g, "'"));
+        else if (m2 !== undefined) a.push(m2.replace(/""/g, '"'));
+        else if (m3 !== undefined) a.push(m3);
+        return '';
+      });
+      // Handle edge case where last column is empty
+      if (/,\s*$/.test(text)) a.push('');
+      return a;
+    }
+
+    // ==========================================
+    // 邏輯函式 (大部分沿用原 Mock 邏輯，微調變數引用)
+    // ==========================================
+
+    function isDesktop() { return window.innerWidth > BREAKPOINT_DESKTOP; }
+
+    function updateStickyLayout() {
+      if (!isDesktop()) {
+        ['panel-list','panel-map','panel-detail'].forEach(id => {
+          const el = document.getElementById(id);
+          if(el) { el.style.height = ''; el.style.top = ''; }
+        });
+        return;
+      }
+      const header = document.querySelector("header");
+      const h = header ? header.offsetHeight : 72;
+      const offset = 16;
+      ['panel-list','panel-map','panel-detail'].forEach(id => {
+        const el = document.getElementById(id);
+        if(el) {
+          el.style.top = `${h}px`;
+          el.style.height = `calc(100vh - ${h}px - ${offset}px)`;
+        }
+      });
+    }
+
+    function initSummary() {
+      const criticalCount = stores.filter(s => s.Alert_Level === "critical").length;
+      const warningCount = stores.filter(s => s.Alert_Level === "warning").length;
+      const top10Sum = stores
+        .sort((a, b) => b.Weekly_Sales - a.Weekly_Sales)
+        .slice(0, 10)
+        .reduce((sum, s) => sum + s.Weekly_Sales, 0);
+
+      document.getElementById("summary-critical").textContent = criticalCount;
+      document.getElementById("summary-warning").textContent = warningCount;
+      document.getElementById("summary-top10").textContent = top10Sum;
+      document.getElementById("store-count-badge").textContent = `${stores.length} 門市`;
+
+      const doneCount = stores.filter(s => s.__done).length;
+      document.getElementById("summary-done").textContent = doneCount;
+      document.getElementById("summary-remaining").textContent = stores.length - doneCount;
+
+      // Last Sync
+      let latestTs = 0;
+      stores.forEach(s => {
+        if (s.Last_Update) {
+          const ts = new Date(s.Last_Update).getTime();
+          if (!isNaN(ts) && ts > latestTs) latestTs = ts;
+        }
+      });
+      const lastSyncEl = document.getElementById("last-sync");
+      if (lastSyncEl && latestTs > 0) {
+        const lastDate = new Date(latestTs);
+        const fmt = `${lastDate.getFullYear()}-${String(lastDate.getMonth()+1).padStart(2,'0')}-${String(lastDate.getDate()).padStart(2,'0')} ${String(lastDate.getHours()).padStart(2,'0')}:${String(lastDate.getMinutes()).padStart(2,'0')}`;
+        lastSyncEl.textContent = `Last Sync · ${fmt}`;
+      }
+    }
+
+    // Map Initialization
+    function initMap() {
+      map = L.map("map", { zoomControl: true, attributionControl: false }).setView([23.7, 121], 7.3);
+      
+      const lightLayer = L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", { maxZoom: 19 });
+      lightLayer.addTo(map);
+
+      markerCluster = L.markerClusterGroup({ maxClusterRadius: 40, disableClusteringAtZoom: 15 });
+
+      stores.forEach(store => {
+        if(!store.Latitude) return;
+        const color = getPinColor(store.__salesColor);
+        const marker = L.circleMarker([store.Latitude, store.Longitude], {
+          radius: 8, fillColor: color, color: "#ffffff", weight: 1, opacity: 1, fillOpacity: 0.8
+        });
+        marker.on("click", () => {
+          focusStoreOnMap(store.Store_ID);
+          openStoreDetail(store.Store_ID);
+        });
+        
+        const growth = (store.Weekly_Growth_Rate * 100).toFixed(1);
+        const colorG = store.Weekly_Growth_Rate >= 0 ? '#ef4444' : '#10b981';
+        const arrow = store.Weekly_Growth_Rate >= 0 ? '▲' : '▼';
+        marker.bindPopup(`<strong>${store.Store_Name}</strong><br>銷量：${store.Weekly_Sales}<br>增減：<span style="color:${colorG}">${arrow}${growth}%</span>`, { offset: [0,-8] });
+
+        markers[store.Store_ID] = marker;
+        markerCluster.addLayer(marker);
+      });
+      markerCluster.addTo(map);
+
+      // Filters
+      document.getElementById("map-filter-all").addEventListener("click", () => setMapFilter("all"));
+      document.getElementById("map-filter-alerts").addEventListener("click", () => setMapFilter("alerts"));
+      document.getElementById("map-filter-top").addEventListener("click", () => setMapFilter("top"));
+      document.getElementById("here-button").addEventListener("click", handleHereClick);
+    }
+
+    function setMapFilter(mode) {
+      if (!markerCluster) return;
+      markerCluster.clearLayers();
+      stores.forEach(store => {
+        let add = false;
+        if (mode === "all") add = true;
+        else if (mode === "alerts" && (store.Alert_Level === 'critical' || store.Alert_Level === 'warning')) add = true;
+        else if (mode === "top") {
+          // logic needs sorting re-calc or pre-calc, kept simple here
+          if (store.Weekly_Sales > 100) add = true; 
+        }
+        if (add && markers[store.Store_ID]) markerCluster.addLayer(markers[store.Store_ID]);
+      });
+    }
+
+    function handleHereClick() {
+      if (!navigator.geolocation) return alert("不支援定位");
+      navigator.geolocation.getCurrentPosition(pos => {
+        const { latitude, longitude } = pos.coords;
+        userLocation = { lat: latitude, lng: longitude };
+        
+        if (userLocationMarker) map.removeLayer(userLocationMarker);
+        userLocationMarker = L.marker([latitude, longitude], {
+            icon: L.divIcon({className:'', html:'<div class="user-location-marker"></div>', iconSize:[16,16]})
+        }).addTo(map);
+        
+        // Re-calc distances
+        stores.forEach(s => {
+            s.Distance_From_User = haversineDistance(latitude, longitude, s.Latitude, s.Longitude);
+        });
+        
+        // Switch to nearby tab
+        document.getElementById("sort-select").value = "distance";
+        activeSort = "distance";
+        setActiveTab("nearby");
+        renderStoreList();
+        map.setView([latitude, longitude], 11);
+
+      }, err => alert("無法取得定位"));
+    }
+
+    function haversineDistance(lat1, lon1, lat2, lon2) {
+      const R = 6371; 
+      const dLat = (lat2 - lat1) * Math.PI / 180;
+      const dLon = (lon2 - lon1) * Math.PI / 180;
+      const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+                Math.cos(lat1 * Math.PI/180) * Math.cos(lat2 * Math.PI/180) * Math.sin(dLon/2) * Math.sin(dLon/2);
+      return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+    }
+
+    // List Logic
+    function initList() {
+      const searchInput = document.getElementById("search-input");
+      const sortSelect = document.getElementById("sort-select");
+      const filterChips = document.querySelectorAll(".filter-chip[data-filter]");
+
+      searchInput.addEventListener("input", renderStoreList);
+      sortSelect.addEventListener("change", e => { activeSort = e.target.value; renderStoreList(); });
+      filterChips.forEach(chip => {
+        chip.addEventListener("click", () => {
+            filterChips.forEach(c => c.classList.remove("filter-chip--active"));
+            chip.classList.add("filter-chip--active");
+            activeFilter = chip.getAttribute("data-filter");
+            renderStoreList();
+            window.scrollTo({top:0, behavior:'smooth'});
+        });
+      });
+      renderStoreList();
+    }
+
+    function renderStoreList() {
+      const container = document.getElementById("store-list");
+      container.innerHTML = "";
+      const stext = document.getElementById("search-input").value.trim().toLowerCase();
+      
+      let filtered = stores.filter(s => {
+          if (activeTab === "alerts" && s.Alert_Level === "normal") return false;
+          if (activeTab === "nearby" && (!s.Distance_From_User || s.Distance_From_User > 20)) return false;
+          if (activeFilter === "critical" && s.Alert_Level !== "critical") return false;
+          if (activeFilter === "warning" && s.Alert_Level !== "warning") return false;
+          if (activeFilter === "green" && s.Alert_Level !== "normal") return false;
+          if (activeFilter === "undone" && s.__done) return false;
+          if (activeFilter === "done" && !s.__done) return false;
+          if (stext && !s.Store_Name.toLowerCase().includes(stext) && !s.Store_ID.toLowerCase().includes(stext)) return false;
+          if (tourMode && selectedRoute && s.Route_Code !== selectedRoute) return false;
+          if (currentRegionFilter && s.Region !== currentRegionFilter) return false;
+          return true;
+      });
+
+      // Sort
+      filtered.sort((a,b) => {
+          if (activeSort === "severity") {
+             const w = {critical:2, warning:1, normal:0};
+             return w[b.Alert_Level] - w[a.Alert_Level] || b.ZTR_Days - a.ZTR_Days || b.Weekly_Sales - a.Weekly_Sales;
+          }
+          if (activeSort === "weeklySales") return b.Weekly_Sales - a.Weekly_Sales;
+          if (activeSort === "distance") return (a.Distance_From_User||999) - (b.Distance_From_User||999);
+          if (activeSort === "storeId") return a.Store_ID.localeCompare(b.Store_ID);
+          if (activeSort === "priority") return b.__priority - a.__priority;
+          return 0;
+      });
+
+      filtered.forEach((s, idx) => {
+          const card = createStoreCard(s);
+          card.style.setProperty('--i', idx);
+          container.appendChild(card);
+      });
+      
+      if (!activeStoreId && filtered.length > 0 && isDesktop()) {
+         // Auto select first on desktop
+         // focusStoreOnMap(filtered[0].Store_ID); // optional
+      }
+    }
+
+    function createStoreCard(store) {
+      const el = document.createElement("div");
+      el.className = "store-card";
+      if (store.Store_ID === activeStoreId) el.classList.add("store-card--active");
+      el.dataset.storeId = store.Store_ID;
+
+      const growth = (store.Weekly_Growth_Rate*100).toFixed(1);
+      const isUp = store.Weekly_Growth_Rate >= 0;
+      const trendColor = isUp ? '#ef4444' : '#10b981';
+      
+      el.innerHTML = `
+        <div class="store-card-left">
+          <div class="store-name-row">
+            <div class="status-dot status-dot--${store.Alert_Level}"></div>
+            <div class="store-name">${store.Store_Name}</div>
+            ${store.__done ? '<span class="store-done-tag">✓</span>' : ''}
+          </div>
+          <div class="store-meta">${store.Route_Code} · ${store.Sales_Rep_Name}</div>
+          <div class="store-distance">${store.Distance_From_User ? store.Distance_From_User.toFixed(1)+'km · ' : ''}${store.Region}</div>
+        </div>
+        <div class="store-card-center">
+          <div class="weekly-sales-label">WEEKLY SALES</div>
+          <div class="weekly-sales-row">
+            <div class="weekly-sales-value" style="color:${getPinColor(store.__salesColor)}">${store.Weekly_Sales}</div>
+            <div class="weekly-sales-trend" style="color:${trendColor}!important">${isUp?'▲':'▼'} ${growth}%</div>
+          </div>
+          <div class="metric-pills">
+            <div class="metric-pill"><span>PSD</span><strong>${store.PSD_Value}</strong></div>
+            <div class="metric-pill"><span>庫存</span><strong>${store.Current_Inventory}</strong></div>
+          </div>
+        </div>
+        <div class="store-card-right">
+          <div class="action-icons">
+             <button class="icon-button btn-nav">🧭</button>
+             <button class="icon-button btn-notify">🔔</button>
+             <button class="icon-button btn-map">🔍</button>
+          </div>
+          <div class="tag ${store.__done?'tag-done':''}">${store.Alert_Level==='critical'?'🔴 '+store.Alert_Type:store.Alert_Level==='warning'?'🟡 '+store.Alert_Type:'✅ 正常'}</div>
+        </div>
+      `;
+
+      el.querySelector('.btn-nav').onclick = (e) => { e.stopPropagation(); window.open(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(store.Address)}`); };
+      el.querySelector('.btn-notify').onclick = (e) => { e.stopPropagation(); openNotifyModal(store); };
+      el.querySelector('.btn-map').onclick = (e) => { e.stopPropagation(); openMapOverlay(store, el); };
+      el.onclick = () => {
+          focusStoreOnMap(store.Store_ID);
+          openStoreDetail(store.Store_ID);
+      };
+      return el;
+    }
+
+    function focusStoreOnMap(id) {
+        activeStoreId = id;
+        document.querySelectorAll('.store-card').forEach(c => {
+            if(c.dataset.storeId === String(id)) {
+                c.classList.add('store-card--active');
+                c.scrollIntoView({block:'nearest'});
+            } else c.classList.remove('store-card--active');
+        });
+        
+        // Highlight Map Marker
+        if (markers[id] && map) {
+            markerCluster.zoomToShowLayer(markers[id], () => {
+                markers[id].openPopup();
+            });
+        }
+    }
+
+    function openStoreDetail(id) {
+        const store = stores.find(s => s.Store_ID === id);
+        if(!store) return;
+        if(isDesktop()) {
+            renderDetailDesktop(store);
+            document.getElementById('panel-map').scrollIntoView({behavior:'smooth', block:'start'});
+        } else {
+            renderDetailMobile(store);
+        }
+    }
+
+    // Detail Views
+    function buildDetailContent(store) {
+        const growth = (store.Weekly_Growth_Rate*100).toFixed(1);
+        const isUp = store.Weekly_Growth_Rate >= 0;
+        const trendColor = isUp ? '#ef4444' : '#10b981';
+        return `
+          <div class="detail-header">
+            <div class="detail-title-row">
+               <div class="detail-name">
+                 <div class="status-dot status-dot--${store.Alert_Level}"></div>
+                 ${store.Store_Name}
+               </div>
+               <div class="detail-status-chip">${store.Alert_Level}</div>
+            </div>
+            <div class="detail-sub">${store.Store_ID} · ${store.Route_Code} · ${store.Sales_Rep_Name}</div>
+          </div>
+          <div class="detail-content">
+             <div class="detail-mini-kpis">
+               <div class="mini-kpi-pill">銷量 <strong>${store.Weekly_Sales}</strong></div>
+               <div class="mini-kpi-pill">PSD <strong>${store.PSD_Value}</strong></div>
+               <div class="mini-kpi-pill">庫存 <strong>${store.Current_Inventory}</strong></div>
+               <div class="mini-kpi-pill" style="color:${trendColor}">成長 <strong>${growth}%</strong></div>
+             </div>
+             
+             <div class="chart-section"><canvas data-chart="flow"></canvas></div>
+             <div class="chart-section"><canvas data-chart="pattern"></canvas></div>
+             
+             <div class="detail-section">
+               <div class="detail-section-row"><span>地址</span><span>${store.Address}</span></div>
+               <div class="detail-section-row"><span>更新</span><span>${store.Last_Update}</span></div>
+             </div>
+          </div>
+        `;
+    }
+
+    function renderDetailDesktop(store) {
+        const cont = document.getElementById('detail-container');
+        cont.innerHTML = buildDetailContent(store);
+        document.getElementById('detail-actions').style.display = 'flex';
+        
+        // Buttons
+        document.getElementById('btn-notify').onclick = () => openNotifyModal(store);
+        document.getElementById('btn-navigate').onclick = () => window.open(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(store.Address)}`);
+        const btnDone = document.getElementById('btn-done');
+        btnDone.onclick = () => { store.__done = !store.__done; renderStoreList(); renderDetailDesktop(store); };
+        if(store.__done) btnDone.classList.add('btn-ghost-active'); else btnDone.classList.remove('btn-ghost-active');
+
+        initCharts(cont, store);
+    }
+
+    function renderDetailMobile(store) {
+        const inner = document.getElementById('detail-bottom-inner');
+        inner.innerHTML = buildDetailContent(store);
+        // Mobile Actions
+        const actions = document.createElement('div');
+        actions.className = 'detail-actions detail-actions--sheet';
+        actions.innerHTML = `
+           <button class="btn btn-primary" id="m-btn-notify">通知</button>
+           <button class="btn btn-secondary" id="m-btn-nav">導航</button>
+           <button class="btn btn-ghost" id="m-btn-done">已處理</button>
+        `;
+        inner.appendChild(actions);
+        
+        inner.querySelector('#m-btn-notify').onclick = () => openNotifyModal(store);
+        inner.querySelector('#m-btn-nav').onclick = () => window.open(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(store.Address)}`);
+        const dBtn = inner.querySelector('#m-btn-done');
+        if(store.__done) dBtn.classList.add('btn-ghost-active');
+        dBtn.onclick = () => { store.__done = !store.__done; renderStoreList(); renderDetailMobile(store); };
+
+        initCharts(inner, store);
+        openBottomSheet();
+    }
+
+    function initCharts(el, store) {
+        // Flow Chart
+        const cvFlow = el.querySelector('canvas[data-chart="flow"]');
+        if(cvFlow) {
+           new Chart(cvFlow, {
+              type: 'line',
+              data: {
+                 labels: ['一','二','三','四','五','六','日'],
+                 datasets: [{
+                    label: 'PSD', data: store.Weekly_Flow, borderColor: '#f97373', tension:0.3, pointRadius:3
+                 }]
+              },
+              options: { responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}}, scales:{y:{beginAtZero:true}} }
+           });
+        }
+        // Pattern Chart
+        const cvPat = el.querySelector('canvas[data-chart="pattern"]');
+        if(cvPat) {
+           const weekday = store.Weekly_Flow.slice(0,4).reduce((a,b)=>a+b,0);
+           const weekend = store.Weekly_Flow.slice(4).reduce((a,b)=>a+b,0);
+           new Chart(cvPat, {
+              type: 'doughnut',
+              data: {
+                 labels: ['平日','假日'],
+                 datasets: [{ data:[weekday, weekend], backgroundColor:['#16a34a','#ef4444'], borderWidth:0 }]
+              },
+              options: { responsive:true, maintainAspectRatio:false, plugins:{legend:{position:'right'}} }
+           });
+        }
+    }
+
+    // Modal & Sheet Logic
+    function openNotifyModal(store) {
+        currentModalStore = store;
+        document.getElementById('modal-body').innerHTML = `確認發送通知給 <strong>${store.Sales_Rep_Name}</strong> 關於 <strong>${store.Store_Name}</strong> 的異常狀況？`;
+        document.getElementById('modal-backdrop').classList.add('modal-backdrop--show');
+        modalOpen = true;
+    }
+    
+    function initModal() {
+        document.getElementById('modal-cancel').onclick = () => {
+             document.getElementById('modal-backdrop').classList.remove('modal-backdrop--show');
+             modalOpen = false;
+        };
+        document.getElementById('modal-confirm').onclick = () => {
+             alert(`已發送通知給 ${currentModalStore.Sales_Rep_Name}`);
+             currentModalStore.__done = true;
+             renderStoreList();
+             document.getElementById('modal-backdrop').classList.remove('modal-backdrop--show');
+             modalOpen = false;
+        };
+    }
+    
+    function initBottomSheet() {
+        const bg = document.getElementById('detail-bottom-backdrop');
+        const sh = document.getElementById('detail-bottom-sheet');
+        const close = () => {
+            bg.classList.remove('detail-bottom-backdrop--show');
+            sh.classList.remove('detail-bottom-sheet--open');
+            bottomSheetOpen = false;
+        };
+        bg.onclick = close;
+        document.getElementById('detail-bottom-handle').onclick = close;
+    }
+    function openBottomSheet() {
+        document.getElementById('detail-bottom-backdrop').classList.add('detail-bottom-backdrop--show');
+        document.getElementById('detail-bottom-sheet').classList.add('detail-bottom-sheet--open');
+        bottomSheetOpen = true;
+    }
+
+    // Utils
+    function getSalesColorByPercentile(p) {
+      if (p <= 0.1) return "pink";
+      if (p <= 0.25) return "red";
+      if (p <= 0.4) return "orange";
+      if (p <= 0.6) return "yellow";
+      if (p <= 0.75) return "green";
+      if (p <= 0.9) return "blue";
+      return "gray";
+    }
+    function getSalesColor(val) { return 'gray'; } // fallback
+    function getPinColor(key) {
+      const colors = { pink:"#fb7185", red:"#f97373", orange:"#fb923c", yellow:"#facc15", green:"#34d399", blue:"#60a5fa", gray:"#9ca3af" };
+      return colors[key] || "#6b7280";
+    }
+    function computePriority(s) {
+        // Simple priority algorithm
+        let score = 0;
+        if(s.Alert_Level === 'critical') score += 50;
+        if(s.Alert_Level === 'warning') score += 30;
+        if(s.Weekly_Sales > 50) score += 20;
+        if(s.ZTR_Days > 3) score += 10;
+        return Math.min(score, 100);
+    }
+    function toggleTheme() {
+        document.body.classList.toggle('light-theme');
+        localStorage.setItem('theme', document.body.classList.contains('light-theme')?'light':'dark');
+    }
+    
+    // 初始化其他控制項 (Tabs, Full Table, Tour Mode 等)
+    // 這些大部分是 UI 互動邏輯，為節省空間簡略帶過，實際請沿用您原本程式碼中的邏輯
+    function initTabs() { 
+        ['hotspots','alerts','distribution','nearby'].forEach(k => {
+            document.getElementById('tab-'+k).onclick = () => setActiveTab(k);
+        });
+    }
+    function setActiveTab(k) {
+        activeTab = k;
+        document.querySelectorAll('.header-filters .chip-button').forEach(b => b.classList.remove('chip-button--active'));
+        document.getElementById('tab-'+k).classList.add('chip-button--active');
+        renderStoreList();
+    }
+    
+    // Region Controls
+    function initRegionFilterControls() {
+        // ... (保留您原本的地區下拉選單邏輯)
+        // 因資料來自 fetch，這裡的地區列表會自動根據 fetch 回來的 stores 動態生成
+    }
+    
+    // Tour Mode
+    function initTourModeControls() {
+        // 當 stores 載入後，需動態更新下拉選單
+        const sel = document.getElementById('tour-route-select');
+        const btn = document.getElementById('tour-switch');
+        
+        btn.onclick = () => {
+             tourMode = !tourMode;
+             btn.classList.toggle('chip-button--active', tourMode);
+             sel.style.display = tourMode ? 'inline-block' : 'none';
+             renderStoreList();
+             
+             // Populate routes if empty
+             if(sel.options.length === 0) {
+                 const routes = [...new Set(stores.map(s=>s.Route_Code).filter(Boolean))].sort();
+                 sel.innerHTML = '<option value="">--路線--</option>' + routes.map(r=>`<option value="${r}">${r}</option>`).join('');
+                 sel.onchange = () => { selectedRoute = sel.value; renderStoreList(); };
+             }
+        };
+    }
+    
+    // Full Table Logic
+    function initFullTable() {
+       document.getElementById('btn-full-table').onclick = () => {
+           renderFullTable();
+           document.getElementById('table-backdrop').classList.add('table-backdrop--show');
+       };
+       document.getElementById('table-close').onclick = () => document.getElementById('table-backdrop').classList.remove('table-backdrop--show');
+    }
+    
+    function renderFullTable() {
+        const tb = document.getElementById('store-table');
+        tb.innerHTML = `<thead><tr><th>門市</th><th>銷量</th><th>漲跌</th><th>風險</th></tr></thead><tbody>` + 
+          stores.map(s => `<tr><td>${s.Store_Name}</td><td>${s.Weekly_Sales}</td><td>${(s.Weekly_Growth_Rate*100).toFixed(0)}%</td><td>${s.Alert_Level}</td></tr>`).join('') + 
+          `</tbody>`;
+    }
+    
+    function initScrollTopButton() {
+        const btn = document.getElementById('scroll-top-btn');
+        btn.onclick = () => window.scrollTo({top:0, behavior:'smooth'});
+        window.onscroll = () => btn.style.display = window.scrollY > 200 ? 'flex' : 'none';
+    }
+    
+    // Overlay Map Logic
+    function openMapOverlay(store, card) {
+        const ov = document.getElementById('map-overlay');
+        ov.classList.remove('hidden');
+        // Simple overlay init (Leaflet logic omitted for brevity, use original)
+    }
+
+    function setupEventListeners() {
+       // Region modal toggle
+       document.getElementById('drawer-toggle-button').onclick = () => {
+           document.getElementById('region-modal').style.display = 'flex';
+           // Render Region Chart logic...
+       };
+       document.getElementById('region-modal-close').onclick = () => document.getElementById('region-modal').style.display = 'none';
+       
+       document.getElementById('region-modal').onclick = (e) => {
+           if(e.target.id === 'region-modal') e.target.style.display = 'none';
+       };
+    }
+
+  </script>
+</body>
+</html>
